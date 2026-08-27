@@ -62,6 +62,12 @@ def build(source):
             "WFSerializationType": "WFTextTokenString",
         }
 
+    def tvar(key, name):
+        """A TEXT field whose whole content is one variable. Text fields need a
+        token *string* with an embedded attachment; a bare attachment (which is
+        correct for variable-only fields like WFInput) leaves them empty."""
+        return text([(key, name)])
+
     def action(identifier, **params):
         return {
             "WFWorkflowActionIdentifier": f"is.workflow.actions.{identifier}",
@@ -69,25 +75,27 @@ def build(source):
         }
 
     if source == "share":
-        head = [action("detect.link",
-                       UUID=U["link"],
-                       WFInput={"Value": {"Type": "ExtensionInput"},
-                                "WFSerializationType": "WFTextTokenAttachment"})]
+        head = []
+        # The share sheet hands over the URL directly.
+        source_url = {
+            "Value": {"string": PLACEHOLDER,
+                      "attachmentsByRange": {"{0, 1}": {"Type": "ExtensionInput"}}},
+            "WFSerializationType": "WFTextTokenString",
+        }
     else:
-        head = [
-            action("getclipboard", UUID=U["clip"]),
-            action("detect.link", UUID=U["link"], WFInput=output("clip", "Clipboard")),
-        ]
+        # The clipboard already holds a clean URL, so no link detection needed.
+        head = [action("getclipboard", UUID=U["clip"])]
+        source_url = tvar("clip", "Clipboard")
 
     return head + [
         # Fetch the Spotify page. Follows redirects, so spotify.link resolves here.
         action("downloadurl",
-               UUID=U["html"], WFHTTPMethod="GET", WFURL=output("link", "URLs")),
+               UUID=U["html"], WFHTTPMethod="GET", WFURL=source_url),
 
         # og:title -> the track name.
         action("text.match",
                UUID=U["m_title"], WFMatchTextPattern=OG_TITLE_RE,
-               text=output("html", "Contents of URL")),
+               text=tvar("html", "Contents of URL")),
         action("text.match.getgroup",
                UUID=U["title"], WFGroupIndex=1, WFGetGroupType="Group At Index",
                WFInput=output("m_title", "Matches")),
@@ -95,7 +103,7 @@ def build(source):
         # og:description -> "Artist · Title · Song · Year".
         action("text.match",
                UUID=U["m_desc"], WFMatchTextPattern=OG_DESC_RE,
-               text=output("html", "Contents of URL")),
+               text=tvar("html", "Contents of URL")),
         action("text.match.getgroup",
                UUID=U["desc"], WFGroupIndex=1, WFGetGroupType="Group At Index",
                WFInput=output("m_desc", "Matches")),
@@ -103,7 +111,7 @@ def build(source):
         # First segment of the description is the artist.
         action("text.split",
                UUID=U["parts"], WFTextSeparator="Custom",
-               WFTextCustomSeparator=SEPARATOR, text=output("desc", "Matched Text")),
+               WFTextCustomSeparator=SEPARATOR, text=tvar("desc", "Matched Text")),
         action("getitemfromlist",
                UUID=U["artist"], WFItemSpecifier="First Item",
                WFInput=output("parts", "Split Text")),
@@ -126,7 +134,7 @@ def build(source):
                    f"&media=music&entity=song&country={STOREFRONT}&limit=1",
                ])),
         action("downloadurl",
-               UUID=U["json"], WFHTTPMethod="GET", WFURL=output("api", "Text")),
+               UUID=U["json"], WFHTTPMethod="GET", WFURL=tvar("api", "Text")),
 
         # results[0].trackViewUrl
         action("getvalueforkey",
