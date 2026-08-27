@@ -1,0 +1,140 @@
+# Building the "Open in Apple Music" Shortcut
+
+About five minutes of tapping. Build it in the Shortcuts app on the iPhone, or
+on the Mac and let iCloud sync it over.
+
+The algorithm is the one verified by the test suite in this repo. If anything
+here behaves oddly, run the same link through the CLI first to see what the
+reference implementation does with it:
+
+```bash
+node src/cli.js "https://open.spotify.com/track/..."
+```
+
+## Shortcut settings
+
+- **Name:** `Open in Apple Music` — this is the label you'll tap in the share sheet
+- **Details → Show in Share Sheet:** ON
+- **Accepted input types:** `URLs` and `Text` only. Uncheck everything else, or
+  the Shortcut clutters the share sheet for images and files.
+
+## Actions
+
+Action names drift slightly between iOS versions. If one doesn't exist under
+the exact name below, search for the closest match — the shape is what matters.
+
+**1. Receive input**
+
+`Receive` `URLs` and `Text` input from `Share Sheet`
+
+**2. Get the link**
+
+`Get URLs from Input`
+
+**3. Fetch the Spotify page**
+
+`Get Contents of URL` — Method `GET`, URL = `URLs` from step 2
+
+This returns the page HTML. It also follows redirects, which is why
+`spotify.link` short URLs work without any extra handling.
+
+**4. Pull out the title**
+
+`Match Text` — Regular Expression:
+
+```
+<meta property="og:title" content="([^"]*)"
+```
+
+Then `Get Group at Index 1 from Matched Text`. Rename this variable **Title**.
+
+**5. Pull out the description**
+
+`Match Text` on the same `Contents of URL`:
+
+```
+<meta property="og:description" content="([^"]*)"
+```
+
+Then `Get Group at Index 1 from Matched Text`.
+
+This yields something like `Carly Rae Jepsen · Cut To The Feeling · Song · 2017`.
+
+**6. Take the artist from the description**
+
+`Split Text` — separator: **Custom**, value ` · ` (space, middle dot, space)
+
+`Get Item at Index 1 from List` → rename this variable **Artist**
+
+**7. Build the search URL**
+
+`Text`:
+
+```
+https://itunes.apple.com/search?term=[Artist] [Title]&media=music&entity=song&country=CH&limit=5
+```
+
+Insert `Artist` and `Title` as variable tokens. Tap each token and choose
+**URL Encode**. Without that, anything with `&`, `?`, or an apostrophe breaks
+the request.
+
+**8. Search Apple Music**
+
+`Get Contents of URL` — Method `GET`, URL = the `Text` from step 7
+
+**9. Read the results**
+
+`Get Dictionary Value` — Get `Value` for key `results` from `Contents of URL`
+
+**10. Branch**
+
+`If` `Dictionary Value` `has any value`:
+
+- `Get Item at Index 1 from List` (the `results` list)
+- `Get Dictionary Value` — Get `Value` for key `trackViewUrl`
+- `Open URLs` — the `Dictionary Value`
+
+`Otherwise`:
+
+- `Text`: `https://music.apple.com/ch/search?term=[Artist] [Title]`
+  (URL-encode both tokens again)
+- `Open URLs` — that `Text`
+
+`End If`
+
+Apple Music claims `music.apple.com` links, so these open the app, not Safari.
+
+## Verifying it
+
+| Test | Share this | Expect |
+|---|---|---|
+| Match | a Spotify **track** link | Apple Music opens the song |
+| Fallback | a Spotify **playlist** link | Apple Music opens a search screen |
+| Failure | plain text with no link | nothing opens |
+
+If Safari opens instead of Apple Music, the URL is malformed — check that
+step 10 reads `trackViewUrl` and not one of the other URL fields.
+
+## Known differences from the CLI
+
+These are deliberate. The Shortcut is a simplified transcription, not a port.
+
+**It takes the first search result; the CLI scores them.** iTunes ranks
+"Happier Than Ever (Edit) - Single" above the actual 16-track album, so for
+some links the Shortcut opens a different edition than the CLI does.
+Reproducing the scoring in Shortcut actions costs far more than it returns.
+
+**It always searches for songs (`entity=song`).** An album or artist link
+therefore opens a track rather than the album or artist page. Most links
+people share are tracks, so this is the right default.
+
+If you want album and artist links handled properly, insert this after step 5:
+
+- `Match Text` on `Contents of URL` with `<meta property="og:type" content="([^"]*)"`
+- `Get Group at Index 1 from Matched Text`
+- `If` it `is` `music.album` → use `entity=album` and read `collectionViewUrl`
+- `If` it `is` `profile` → use `entity=musicArtist` and read **`artistLinkUrl`**
+
+That last field name is not a typo. Artist results use `artistLinkUrl`; song
+results use `trackViewUrl`. Getting it wrong yields an empty URL and the
+Shortcut silently does nothing.

@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **SUPERSEDED IN PART — 2026-08-27.** Tasks 1, 4, and 5 were written against
+> the Odesli API, which returned `401 PUBLIC_API_ACCESS_DEPRECATED` during
+> execution. The matching engine was replaced with Spotify Open Graph tags plus
+> the iTunes Search API. Tasks 2, 3, 6, 7 and 9 were executed as written.
+> The [design spec](../specs/2026-08-27-spotify-to-applemusic-design.md) and the
+> shipped code are the current source of truth; this plan is kept for the
+> decision history.
+
 **Goal:** A share-sheet Shortcut that turns any Spotify link a friend sends into the same song opened in Apple Music on iPhone.
 
 **Architecture:** Four small modules — pure URL parsing, pure storefront rewriting, one I/O module wrapping the matching API, and a thin orchestrator returning a tagged union. The matching API is isolated behind `src/odesli.js` so it can be swapped without touching parsing, rewriting, or orchestration. The JS is the tested reference implementation; the Shortcut is a hand-built transcription of behavior proven here.

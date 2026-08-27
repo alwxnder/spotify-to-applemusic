@@ -1,0 +1,14 @@
+
+
+
+{
+ "resultCount":5,
+ "results": [
+{"wrapperType":"artist", "artistType":"Artist", "artistName":"Carly Rae Jepsen", "artistLinkUrl":"https://music.apple.com/ch/artist/carly-rae-jepsen/284363062?uo=4", "artistId":284363062, "amgArtistId":1185382, "primaryGenreName":"Pop", "primaryGenreId":14}, 
+{"wrapperType":"artist", "artistType":"Artist", "artistName":"Enrique Iglesias", "artistLinkUrl":"https://music.apple.com/ch/artist/enrique-iglesias/90895?uo=4", "artistId":90895, "amgArtistId":169286, "primaryGenreName":"Pop", "primaryGenreId":14}, 
+{"wrapperType":"artist", "artistType":"Artist", "artistName":"Norah Jones", "artistLinkUrl":"https://music.apple.com/ch/artist/norah-jones/1001750?uo=4", "artistId":1001750, "amgArtistId":510210, "primaryGenreName":"Pop", "primaryGenreId":14}, 
+{"wrapperType":"artist", "artistType":"Artist", "artistName":"bbno$", "artistLinkUrl":"https://music.apple.com/ch/artist/bbno%24/1161580951?uo=4", "artistId":1161580951, "amgArtistId":3546007, "primaryGenreName":"Hip-Hop/Rap", "primaryGenreId":18}, 
+{"wrapperType":"artist", "artistType":"Artist", "artistName":"John Summit", "artistLinkUrl":"https://music.apple.com/ch/artist/john-summit/1387587503?uo=4", "artistId":1387587503, "primaryGenreName":"Dance", "primaryGenreId":17}]
+}
+
+
