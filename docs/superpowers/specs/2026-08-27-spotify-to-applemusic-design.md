@@ -153,6 +153,13 @@ scrapes the canonical URL from the returned HTML's `og:url` meta tag.
   CH-valid match, but verify with a track that has patchy regional licensing.
 - **Odesli API drift.** It is `v1-alpha.1` and unversioned in practice. A
   live smoke test guards against silent breakage.
+- **Short links on the phone.** `spotify.link` URLs are expanded by the JS
+  reference implementation but cannot be expanded by the Shortcut, which has
+  no way to read the final URL after a redirect. They will usually fail to a
+  notification. Workaround documented in the plan if it proves annoying.
+- **Unauthenticated access is unverified.** A probe during design returned
+  HTTP 401, from an environment with no direct internet egress, so the result
+  is inconclusive. Task 1 of the plan settles it before any code depends on it.
 
 ## Testing
 
