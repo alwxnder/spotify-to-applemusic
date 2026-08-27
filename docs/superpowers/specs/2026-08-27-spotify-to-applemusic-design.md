@@ -42,141 +42,152 @@ Roughly three taps, works from every app that has a share sheet (including
 in-app browsers), never expires, and requires no Mac, no signing, and no
 account.
 
-### Matching engine: Odesli
+### Matching engine: Spotify og: tags + iTunes Search API
 
-`https://api.song.link/v1-alpha.1/links` — the public API behind song.link.
-No API key, no auth, ~10 requests/minute unauthenticated. Personal-use volume
-is far below that ceiling.
+**Revised 2026-08-27.** The original design used Odesli (song.link). During
+implementation its API returned:
 
-The official Apple Music API was ruled out: it requires a developer token
-(JWT signed with a private key), which requires a paid account.
+```
+HTTP 401 {"statusCode":401,"code":"PUBLIC_API_ACCESS_DEPRECATED"}
+```
 
-**Privacy note:** each lookup sends the Spotify URL to Odesli, a third party.
-The URL is a public song link, not personal data, but it does leave the device.
+Odesli has retired unauthenticated public API access. Obtaining a key requires
+a human request of unknown cost and turnaround, and the key would have to be
+embedded in the Shortcut and kept out of this public repo. Replaced with two
+endpoints that are public today and verified working:
+
+1. **`https://open.spotify.com/<kind>/<id>`** — the page's Open Graph meta
+   tags carry title, artist, and entity type in server-rendered HTML. No JS
+   execution needed.
+2. **`https://itunes.apple.com/search`** — Apple's own public search endpoint.
+   With `country=CH` it returns URLs already on the Swiss storefront.
+
+Neither requires a key or auth.
+
+**Improvements over the Odesli design:**
+
+- **No third party.** Requests go to Spotify and Apple only. The original
+  privacy caveat is gone.
+- **Short links resolve for free.** Fetching the Spotify page follows
+  redirects, so `spotify.link` URLs work without a separate expansion step —
+  including inside the Shortcut, where this was previously documented as an
+  unfixable gap.
+
+**Regression from the Odesli design:**
+
+- **Matching is by text, not ISRC.** Odesli matched recording identity;
+  iTunes Search matches names. It can return a remaster, a live cut, or the
+  wrong edition. Mitigated by scoring (below), not eliminated.
+
+### Open Graph shapes (observed, not assumed)
+
+| Kind | `og:type` | `og:title` | `og:description` |
+|---|---|---|---|
+| track | `music.song` | track name | `Artist · Title · Song · Year` |
+| album | `music.album` | `Title - Album by Artist \| Spotify` | `Artist · album · Year · N songs` |
+| artist | `profile` | artist name | `Artist · N monthly listeners.` |
+| playlist | `music.playlist` | playlist name | `Playlist · Owner · N items · N saves` |
+
+`og:type` is the discriminator. For tracks and albums the artist is the first
+`·`-separated segment of `og:description`.
 
 ## Architecture
 
-Two artifacts, deliberately not sharing code at runtime:
+Nothing hosted, nothing to keep alive.
 
 ```
-src/resolve.js   ← the algorithm, pure and testable (Node)
-test/            ← recorded Odesli fixtures + assertions
-shortcut/        ← generated .shortcut plist + manual build steps
+src/extract.js       - URL extraction + normalization (pure)
+src/storefront.js    - storefront rewriting (pure)
+src/spotify-meta.js  - fetch + parse og: tags
+src/itunes.js        - Apple Music search + result scoring
+src/resolve.js       - orchestration -> Result union
+src/cli.js           - desktop verification harness
+shortcut/            - build guide for the iOS Shortcut
 ```
 
-### Why the JS exists if the Shortcut can't import it
+`spotify-meta.js` and `itunes.js` are the only modules performing I/O, and are
+the only ones that would change if the matching strategy changes again.
 
-The Shortcuts app cannot run a JavaScript module. Truly sharing code would
-require hosting a resolver endpoint, which reintroduces exactly the
-maintenance burden the Safari extension was rejected for.
+### Why a JS implementation exists if the Shortcut cannot import it
 
-So `resolve.js` is not a runtime dependency. It is:
-
-1. **The test harness.** Shortcuts is untestable — there is no way to assert
-   its behavior on malformed input, a 429, or an `/intl-de/` URL. The JS lets
-   the algorithm's edge cases be verified before the Shortcut is built.
-2. **The reference implementation.** The Shortcut is a transcription of
-   behavior already proven correct here.
-3. **The head start on a Safari extension**, if the account tier ever changes.
-   It drops in nearly verbatim.
+The Shortcuts app cannot run a JavaScript module, and hosting a resolver would
+reintroduce the maintenance burden the Safari extension was rejected for. So
+the JS is not a runtime dependency. It is the tested reference implementation:
+Shortcuts is untestable, so this is the only way to verify edge cases before
+transcribing proven behavior into Shortcut actions. It also becomes a Safari
+extension nearly verbatim if the account tier ever changes.
 
 ## The algorithm
 
-### Public interface (`src/resolve.js`)
-
-```js
-extractSpotifyUrl(text)            // -> string | null
-normalizeSpotifyUrl(url)           // -> { url, kind, id } | null
-resolveToAppleMusic(input, opts)   // -> Promise<Result>
-```
-
-`kind` is one of `track | album | artist | playlist | episode | show`.
-`opts` is `{ country = 'CH', fetch = globalThis.fetch }`.
-
-`Result` is a tagged union:
-
-```js
-{ status: 'match',  url, kind, title, artist }
-{ status: 'search', url, term, title, artist }
-{ status: 'none',   reason }
-```
-
-### Steps
-
-1. **Extract.** Share sheets frequently pass a sentence, not a bare URL
-   ("this is so good <link>"). Pull the first Spotify URL out of the text.
-2. **Normalize.**
-   - Strip Spotify's locale segment: `/intl-de/track/…` → `/track/…`
-   - Strip tracking params (`?si=`, `?context=`, `?nd=`)
-   - Accept `spotify:track:<id>` URIs and convert to https form
-3. **Match.** `GET /v1-alpha.1/links?url=<encoded>&userCountry=CH`
-4. **Read** `linksByPlatform.appleMusic.url`. Prefer `appleMusic` over
-   `itunes` — the latter points at the Store, not the streaming catalog.
-5. **Force storefront.** Odesli may return any country's URL. Replace a
-   leading two-letter path segment with `ch`; insert `/ch` if absent.
-6. **Open.** The Apple Music app claims `music.apple.com` universal links, so
-   this opens the app rather than the web. No `music://` scheme needed.
-7. **Fall back to search** when there is no Apple Music link: read `title` and
-   `artistName` from `entitiesByUniqueId[entityUniqueId]` and open
-   `music.apple.com/ch/search?term=<title> <artist>`.
-8. **Give up loudly** when Odesli errors, rate-limits, or the input is not a
-   music link. Show a notification; never open something arbitrary.
-
-### Short links
-
-`spotify.link/<code>` needs expansion. Shortcuts has no built-in URL expander,
-and `Get Contents of URL` follows redirects without exposing the final URL.
-
-**Open question, resolve during implementation:** test whether Odesli accepts
-a `spotify.link` URL directly. If it does, no expansion is needed on either
-side. If it does not, `resolve.js` follows the redirect itself, and the
-Shortcut issues a throwaway `Get Contents of URL` against the short link and
-scrapes the canonical URL from the returned HTML's `og:url` meta tag.
+1. **Extract** the Spotify URL from shared text (share sheets pass sentences,
+   not bare URLs).
+2. **Normalize** - strip `/intl-xx/` locale segments and `?si=` tracking
+   params; accept `spotify:track:<id>` URIs.
+3. **Fetch** the Spotify page, following redirects. This resolves
+   `spotify.link` short URLs as a side effect.
+4. **Parse** `og:type`, `og:title`, `og:description` into `{kind, title, artist}`.
+5. **Search** iTunes with `term="<artist> <title>"`, `country=CH`, and an
+   `entity` matching the kind (`song` / `album` / `musicArtist`).
+6. **Score** the results rather than taking the first. Verified necessary: a
+   search for Billie Eilish's *Happier Than Ever* returns the "(Edit) - Single"
+   at index 0 and the real 16-track album at index 1.
+   - +2 when the normalized candidate name equals the normalized target title
+   - +1 when the normalized artist matches
+   - ties broken by original result order
+7. **Read the URL** by entity type - songs and albums use `trackViewUrl` /
+   `collectionViewUrl`; artists use **`artistLinkUrl`**, a different field name.
+   Verified against real responses.
+8. **Force the storefront** to `/ch/` as a safety net. iTunes already returns
+   CH URLs when `country=CH` is passed, so this is belt-and-braces.
+9. **Fall back to search** for playlists and anything unmatched: open
+   `music.apple.com/ch/search?term=...`.
+10. **Give up loudly** on network failure or non-Spotify input - show a
+    notification, never open something arbitrary.
 
 ### Error handling
 
 | Condition | Behavior |
 |---|---|
-| HTTP 429 | Notification: rate-limited, retry shortly |
-| HTTP 4xx/5xx, network failure | Notification: lookup failed |
-| 200 but no `appleMusic` link, title/artist present | Search fallback (step 7) |
-| 200 but no usable title/artist | Notification: no match |
 | Input contains no Spotify URL | Notification: not a Spotify link |
+| Spotify page unreachable | Notification: lookup failed |
+| og tags missing or unparseable | Notification: could not read the link |
+| iTunes returns zero results, title known | Search fallback |
+| iTunes returns zero results, no title | Notification: no match |
+| Playlist link | Search fallback (terms will be poor - inherent) |
 
 ### Known limitations
 
-- **Playlists and podcasts** have no cross-service equivalent. They will reach
-  the search fallback, and for playlists the search terms will be meaningless.
-  Inherent, not fixable.
-- **Forced storefront** could theoretically point at content absent from the
-  Swiss catalog. Passing `userCountry=CH` should make Odesli return a
-  CH-valid match, but verify with a track that has patchy regional licensing.
-- **Odesli API drift.** It is `v1-alpha.1` and unversioned in practice. A
-  live smoke test guards against silent breakage.
-- **Short links on the phone.** `spotify.link` URLs are expanded by the JS
-  reference implementation but cannot be expanded by the Shortcut, which has
-  no way to read the final URL after a redirect. They will usually fail to a
-  notification. Workaround documented in the plan if it proves annoying.
-- **Unauthenticated access is unverified.** A probe during design returned
-  HTTP 401, from an environment with no direct internet egress, so the result
-  is inconclusive. Task 1 of the plan settles it before any code depends on it.
+- **Text matching, not identity matching.** See the regression note above.
+  Scoring reduces but does not remove wrong-edition matches.
+- **Playlists and podcasts** have no cross-service equivalent and will always
+  reach the search fallback with poor terms.
+- **Dependent on Spotify's server-rendered og tags.** If Spotify moves that
+  metadata behind client-side rendering, parsing breaks. The live smoke test
+  is what surfaces this.
+- **iTunes Search is undocumented as a public contract** in the same way
+  Odesli was. It has been stable for years, but Odesli's deprecation is a
+  reminder that free endpoints can close.
 
 ## Testing
 
-`node:test`, with recorded Odesli responses as fixtures. Cases:
+`node:test`, with real recorded responses as fixtures — trimmed Spotify pages
+(the og tags only; full pages are ~250KB) and full iTunes Search JSON. Cases:
 
 - track, album, artist — happy paths
-- `/intl-de/` prefixed URL
-- `spotify:track:` URI form
-- URL embedded in surrounding prose
-- `spotify.link` short link
-- playlist and podcast episode — search fallback
-- HTTP 429 and malformed JSON — error paths
+- `/intl-de/` prefixed URL, `spotify:track:` URI, URL embedded in prose
+- playlist — search fallback
+- og tag parsing for each of the four `og:type` values
+- **scoring**: the recorded *Happier Than Ever* album search, asserting the
+  16-track album wins over the "(Edit) - Single" at index 0
+- **artist field name**: asserting `artistLinkUrl` is read, not `artistViewUrl`
+- zero-result search — fallback path
+- network failure and malformed HTML — error paths
 - storefront rewriting: `/us/` → `/ch/`, and a URL with no country segment
 
-Plus one **live smoke test**, opt-in behind an env var, hitting the real API
-with a known-stable track. Not part of the default run; it exists to catch
-Odesli changing its response shape.
+Plus one **live smoke test**, opt-in behind an env var, hitting both real
+endpoints with a known-stable track. Not part of the default run; it exists to
+catch Spotify moving og tags behind client-side rendering, or iTunes Search
+changing shape.
 
 ## Delivery
 
@@ -196,12 +207,25 @@ roughly five minutes of tapping.
 
 1. Receive URLs and Text from Share Sheet
 2. Get URLs from Input
-3. Text: `https://api.song.link/v1-alpha.1/links?url=…&userCountry=CH`
-4. Get Contents of URL
-5. Get Dictionary Value → `linksByPlatform.appleMusic.url`
-6. If it has a value → Replace Text (storefront regex) → Open URLs
-7. Otherwise → read `title` / `artistName` → Open the search URL
-8. Otherwise → Show Notification
+3. Get Contents of URL (the Spotify link itself — follows redirects, so
+   `spotify.link` short URLs resolve here)
+4. Match Text — `<meta property="og:description" content="([^"]*)"` to get
+   `Artist · Title · …`, and the same against `og:title`
+5. Split Text on ` · ` and take the first item — the artist
+6. Text: `https://itunes.apple.com/search?term=<artist> <title>&media=music&entity=song&country=CH&limit=5`
+   (URL-encode the terms)
+7. Get Contents of URL → Get Dictionary Value `results`
+8. If `results` has any value → Get Item 1 → Get Dictionary Value
+   `trackViewUrl` → Open URLs
+9. Otherwise → Open `https://music.apple.com/ch/search?term=<artist> <title>`
+10. Otherwise → Show Notification
+
+**Deliberate simplification on the phone:** the Shortcut takes the first
+iTunes result rather than reproducing the scoring from step 6 of the
+algorithm — expressing that in Shortcut actions costs far more than it
+returns. Consequence: the Shortcut will occasionally open a different edition
+than the CLI does for the same link. Accepted; revisit only if it proves
+annoying in practice.
 
 Name it **Open in Apple Music** so it reads correctly in the share sheet.
 
