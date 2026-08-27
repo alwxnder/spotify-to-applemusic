@@ -98,6 +98,9 @@ def build(source):
                text=tvar("html", "Contents of URL")),
         action("text.match.getgroup",
                UUID=U["title"], WFGroupIndex=1, WFGetGroupType="Group At Index",
+               # This action family names its input in lowercase, like text.match's
+               # "text". Both keys are sent; Shortcuts ignores the one it doesn't use.
+               matches=output("m_title", "Matches"),
                WFInput=output("m_title", "Matches")),
 
         # og:description -> "Artist · Title · Song · Year".
@@ -106,6 +109,7 @@ def build(source):
                text=tvar("html", "Contents of URL")),
         action("text.match.getgroup",
                UUID=U["desc"], WFGroupIndex=1, WFGetGroupType="Group At Index",
+               matches=output("m_desc", "Matches"),
                WFInput=output("m_desc", "Matches")),
 
         # First segment of the description is the artist.
