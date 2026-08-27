@@ -16,7 +16,20 @@ Apple only — no third-party service is involved.
 
 ## Using it on the phone
 
-Follow [shortcut/BUILD.md](shortcut/BUILD.md). Roughly five minutes.
+Import the pre-built Shortcuts from `shortcut/` (double-click on a Mac, or
+AirDrop to the phone). Two variants, because not every app offers Share:
+
+| Shortcut | Trigger | Use in |
+|---|---|---|
+| `OpenInAppleMusic` | share sheet | Messages, Safari, Spotify, Mail |
+| `AppleMusicFromClipboard` | clipboard | WhatsApp, Instagram, anywhere |
+
+**WhatsApp has no Share on a message long-press** — only Reply, Forward, Copy,
+Star, Delete. So there: **Copy** the message, then run the clipboard variant.
+Bind it to Back Tap (Settings -> Accessibility -> Touch -> Back Tap -> Double
+Tap) and it becomes: copy, double-tap the back of the phone, done.
+
+To build either by hand instead, see [shortcut/BUILD.md](shortcut/BUILD.md).
 
 ## Using it from the terminal
 
